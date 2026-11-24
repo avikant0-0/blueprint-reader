@@ -1,0 +1,25 @@
+# Detector classes and how CubiCasa5K annotation names map onto them.
+#
+# `ids` match the `id` attribute of an SVG group (doors and windows).
+# `furniture` match the second word of a `class="FixedFurniture <Name> ..."` group.
+# Order matters: the list index is the YOLO class id.
+classes:
+  - name: door
+    ids: [Door]
+  - name: window
+    ids: [Window]
+  - name: toilet
+    furniture: [Toilet, Urinal]
+  - name: sink
+    furniture: [Sink, SideSink, RoundSink, CornerSink, DoubleSink, DoubleSinkRight]
+  - name: bathtub
+    furniture: [Bathtub, BathtubRound, Jacuzzi]
+  - name: shower
+    furniture: [Shower, ShowerCab, ShowerPlatform]
+  - name: closet
+    furniture: [Closet, ClosetRound, ClosetTriangle, CoatCloset]
+  - name: appliance
+    furniture: [ElectricalAppliance, GasStove, WoodStove, IntegratedStove,
+                Dishwasher, WashingMachine, GeneralAppliance]
+  - name: fireplace
+    furniture: [Fireplace, FireplaceCorner, FireplaceRound]

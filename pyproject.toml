@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "blueprint-reader"
+version = "0.1.0"
+description = "Page classification, symbol detection, door-schedule extraction and cross-checking for construction drawing sets"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "pillow",
+    "pyyaml",
+    "pymupdf>=1.24.3",
+    "svgpathtools",
+]
+
+[project.optional-dependencies]
+train = ["torch", "torchvision", "ultralytics"]
+vlm = ["openai>=1.0"]
+api = ["fastapi", "uvicorn", "python-multipart"]
+dev = ["pytest", "httpx"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

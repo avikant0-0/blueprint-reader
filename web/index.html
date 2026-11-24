@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blueprint Reader</title>
+<style>
+  :root { --ink:#16202a; --muted:#5b6876; --line:#d9dee4; --bg:#f6f7f9; --accent:#0b5cad; --warn:#b54708; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.5 system-ui, sans-serif; color:var(--ink); background:var(--bg); }
+  header { padding:20px 28px; background:#fff; border-bottom:1px solid var(--line); }
+  h1 { margin:0; font-size:20px; }
+  header p { margin:4px 0 0; color:var(--muted); }
+  main { display:grid; grid-template-columns: 240px 1fr 380px; gap:16px; padding:16px 28px; align-items:start; }
+  section { background:#fff; border:1px solid var(--line); border-radius:8px; padding:14px; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:0 0 10px; }
+  #upload { display:flex; gap:10px; align-items:center; margin-top:12px; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:8px 14px; font:inherit; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:default; }
+  #pages { list-style:none; margin:0; padding:0; max-height:70vh; overflow:auto; }
+  #pages li { padding:6px 8px; border-radius:6px; cursor:pointer; display:flex; justify-content:space-between; gap:8px; }
+  #pages li:hover, #pages li.on { background:#e8f0f9; }
+  .tag { font-size:12px; padding:1px 7px; border-radius:10px; background:#eef0f3; color:var(--muted); white-space:nowrap; }
+  .tag.floor_plan { background:#dcefe2; color:#17603a; } .tag.schedule { background:#e3e9fb; color:#2a3f9d; }
+  .tag.specification { background:#f6ead8; color:#7a4b06; }
+  #viewer { position:relative; overflow:auto; max-height:78vh; }
+  #viewer canvas { width:100%; display:block; }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  th, td { border-bottom:1px solid var(--line); padding:4px 6px; text-align:left; vertical-align:top; }
+  th { color:var(--muted); font-weight:600; }
+  .scroll { max-height:34vh; overflow:auto; }
+  .flag { color:var(--warn); }
+  .muted { color:var(--muted); }
+  ul.plain { margin:4px 0 10px; padding-left:18px; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Blueprint Reader</h1>
+  <p>Upload a construction drawing set. Pages are classified, symbols detected on floor plans, the door schedule extracted, and the two cross-checked.</p>
+  <form id="upload">
+    <input type="file" id="file" accept="application/pdf" required>
+    <button id="go">Analyze</button>
+    <span id="status" class="muted"></span>
+  </form>
+</header>
+<main>
+  <section><h2>Pages</h2><ul id="pages"></ul></section>
+  <section><h2 id="pageTitle">Page</h2><div id="viewer"><canvas id="canvas"></canvas></div><p id="counts" class="muted"></p></section>
+  <div style="display:grid; gap:16px">
+    <section><h2>Cross-check</h2><div id="check" class="muted">Nothing analyzed yet.</div></section>
+    <section><h2>Door schedule</h2><div id="schedule" class="scroll muted">Nothing analyzed yet.</div></section>
+    <section><h2>Methods</h2><div id="methods" class="muted"></div></section>
+  </div>
+</main>
+<script>
+const COLORS = {door:'#e6194b', window:'#3cb44b', toilet:'#4363d8', sink:'#f58231', bathtub:'#911eb4',
+                shower:'#008080', closet:'#9a6324', appliance:'#800000', fireplace:'#808000'};
+const $ = id => document.getElementById(id);
+const el = (tag, text, cls) => { const e = document.createElement(tag); if (text != null) e.textContent = text; if (cls) e.className = cls; return e; };
+let result = null;
+
+$('upload').addEventListener('submit', async ev => {
+  ev.preventDefault();
+  const f = $('file').files[0];
+  if (!f) return;
+  $('go').disabled = true; $('status').textContent = 'Analyzing… large sets take a few minutes.';
+  try {
+    const body = new FormData(); body.append('file', f);
+    const res = await fetch('/api/analyze', {method:'POST', body});
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+    result = data; render();
+    $('status').textContent = `${data.pages_processed} of ${data.pages_total} pages processed.`;
+  } catch (err) { $('status').textContent = 'Failed: ' + err.message; }
+  $('go').disabled = false;
+});
+
+function render() {
+  const list = $('pages'); list.replaceChildren();
+  result.pages.forEach((p, i) => {
+    const li = el('li'); li.append(el('span', 'Page ' + (p.index + 1)), el('span', p.label.replace('_', ' '), 'tag ' + p.label));
+    li.onclick = () => showPage(i); list.append(li);
+  });
+  const firstPlan = result.pages.findIndex(p => p.label === 'floor_plan');
+  showPage(firstPlan >= 0 ? firstPlan : 0);
+  renderSchedule(); renderCheck();
+  const m = result.methods; const box = $('methods'); box.replaceChildren();
+  box.append(el('div', 'Page classifier: ' + m.page_classifier), el('div', 'Detector: ' + (m.detector || 'not loaded')),
+             el('div', 'Schedule extractor: ' + m.schedule_extractor));
+  (result.notes || []).forEach(n => box.append(el('div', n, 'flag')));
+}
+
+function showPage(i) {
+  const p = result.pages[i];
+  [...$('pages').children].forEach((li, k) => li.classList.toggle('on', k === i));
+  $('pageTitle').textContent = `Page ${p.index + 1} · ${p.label.replace('_', ' ')}` + (p.confidence != null ? ` (${(p.confidence * 100).toFixed(0)}%)` : '');
+  const img = new Image();
+  img.onload = () => {
+    const c = $('canvas'); c.width = p.width; c.height = p.height;
+    const g = c.getContext('2d'); g.drawImage(img, 0, 0, p.width, p.height);
+    g.lineWidth = Math.max(3, p.width / 600); g.font = `${Math.max(14, p.width / 180)}px sans-serif`;
+    p.detections.forEach(d => {
+      g.strokeStyle = g.fillStyle = COLORS[d.cls] || '#000';
+      g.strokeRect(d.x1, d.y1, d.x2 - d.x1, d.y2 - d.y1);
+      g.fillText(d.cls, d.x1, Math.max(12, d.y1 - 4));
+    });
+  };
+  img.src = p.image_url;
+  const parts = Object.entries(p.counts || {}).map(([k, v]) => `${v} ${k}`);
+  $('counts').textContent = parts.length ? 'Detected: ' + parts.join(', ') : (p.label === 'floor_plan' ? 'No detections on this page.' : '');
+}
+
+function renderSchedule() {
+  const box = $('schedule'); box.replaceChildren();
+  const rows = result.schedule.rows;
+  if (!rows.length) { box.append(el('div', 'No door schedule rows extracted.')); return; }
+  const cols = Object.keys(rows[0]).filter(k => rows.some(r => r[k]));
+  const t = el('table'), head = el('tr');
+  cols.forEach(c => head.append(el('th', c.replace('_', ' ')))); t.append(head);
+  rows.forEach(r => { const tr = el('tr'); cols.forEach(c => tr.append(el('td', r[c]))); t.append(tr); });
+  box.classList.remove('muted'); box.append(t);
+}
+
+function renderCheck() {
+  const box = $('check'); box.replaceChildren(); const c = result.crosscheck;
+  if (!c) { box.append(el('div', 'Cross-check needs both a detector and a door schedule.')); return; }
+  box.classList.remove('muted');
+  box.append(el('div', `Doors detected on plans: ${c.doors_detected} · Schedule rows: ${c.schedule_rows}`));
+  const group = (title, items) => {
+    box.append(el('div', `${title}: ${items.length}`, items.length ? 'flag' : 'muted'));
+    if (items.length) { const ul = el('ul', null, 'plain'); items.slice(0, 40).forEach(x => ul.append(el('li', x))); box.append(ul); }
+  };
+  group('In schedule, not found on any plan', c.in_schedule_not_on_plan);
+  group('Tag on plan, but no door detected there', c.tag_on_plan_but_no_door_detected);
+  group('Tag near a door, not in schedule', c.tags_near_doors_not_in_schedule.map(u => `${u.tag} (page ${u.page + 1})`));
+  group('Detected doors with no tag nearby', c.detected_doors_without_tag.map(u => `page ${u.page + 1}`));
+  if (!c.text_layer_available) box.append(el('div', 'These sheets have no text layer, so only the counts are comparable.', 'muted'));
+}
+</script>
+</body>
+</html>
